@@ -17,6 +17,8 @@ struct NODE {
 	NODE(double x, double y) :
 		x(x), y(y) {}
 
+	NODE() {}
+
 	bool operator<(const NODE& node) const {
 		return global_num < node.global_num;
 	}
@@ -25,13 +27,15 @@ struct NODE {
 struct ELEM {
 	std::vector<NODE> nodes;
 
+	NODE mass_center;
+
 	int formula_num = -1;
 
 	std::vector<std::vector<double>> local_mat;
 	std::vector<double> local_vec;
 
 	ELEM(std::vector<NODE> nodes, int formula_num, int n) :
-		local_mat(n, std::vector<double>(n,0)), local_vec(n,0),
+		local_mat(n, std::vector<double>(n, 0)), local_vec(n, 0),
 		nodes(nodes), formula_num(formula_num) {}
 
 	ELEM(std::vector<NODE> nodes) :
@@ -91,9 +95,13 @@ void input(AREA& area, std::string nodes_file, std::string elems_file,
 
 		ELEM elem({ area.nodes[node1_global_num],area.nodes[node2_global_num],area.nodes[node3_global_num] },
 			formula_num, 3);
-		std::sort(elem.nodes.begin(), elem.nodes.end());
-		area.grid.push_back(elem);
 
+		std::sort(elem.nodes.begin(), elem.nodes.end());
+		
+		elem.mass_center.x = (elem.nodes[0].x + elem.nodes[1].x + elem.nodes[2].x) / 3;
+		elem.mass_center.y = (elem.nodes[0].y + elem.nodes[1].y + elem.nodes[2].y) / 3;
+
+		area.grid.push_back(elem);
 	}
 	in.close();
 
@@ -128,14 +136,46 @@ void input(AREA& area, std::string nodes_file, std::string elems_file,
 }
 
 double u(NODE node) {
-	return node.x;
+	return node.x + 6 * node.y - 2;
 }
 
-void output(AREA& area, std::vector<double> res, std::string res_file) {
+double calc_detD(ELEM& elem) {
+	return (elem.nodes[1].x - elem.nodes[0].x) * (elem.nodes[2].y - elem.nodes[0].y) -
+		(elem.nodes[2].x - elem.nodes[0].x) * (elem.nodes[1].y - elem.nodes[0].y);
+}
+
+double calc_mes_edge(ELEM& edge) {
+
+	return sqrt(pow(edge.nodes[1].x - edge.nodes[0].x, 2) + pow(edge.nodes[1].y - edge.nodes[0].y, 2));
+
+}
+
+double mass_center_num_val(std::vector<double>& slae_sol, ELEM& elem) {
+	double elem_detD = calc_detD(elem);
+
+	ELEM S23({ elem.nodes[1],elem.nodes[2],elem.mass_center });
+	ELEM S31({ elem.nodes[2], elem.nodes[0],elem.mass_center });
+	ELEM S12({ elem.nodes[0],elem.nodes[1],elem.mass_center });
+
+	double L1 = calc_detD(S23) / elem_detD;
+	double L2 = calc_detD(S31) / elem_detD;
+	double L3 = calc_detD(S12) / elem_detD;
+
+	return slae_sol[elem.nodes[0].global_num] * L1 +
+		slae_sol[elem.nodes[1].global_num] * L2 +
+		slae_sol[elem.nodes[2].global_num] * L3;
+}
+
+void output(AREA& area, std::vector<double> slae_sol, std::string res_file) {
 	std::ofstream out(res_file);
 
-	for (int i = 0; i < res.size(); i++)
-		out << res[i] << " " << u(area.nodes[i]) << std::endl;
+	for (int i = 0; i < slae_sol.size(); i++)
+		out << slae_sol[i] << " " << u(area.nodes[i]) << std::endl;
+
+	out << std::endl;
+
+	for (int i = 0; i < area.grid.size(); i++)
+		out << mass_center_num_val(slae_sol, area.grid[i]) << " " << u(area.grid[i].mass_center) << std::endl;
 }
 
 void portrait(MAT & mat, AREA area) {
@@ -169,7 +209,10 @@ void portrait(MAT & mat, AREA area) {
 double gamma(int formula_num) {
 	switch (formula_num) {
 	case(1):
-		return 1;
+		return 5;
+		break;
+	case(2):
+		return 0;
 		break;
 	}
 }
@@ -177,7 +220,10 @@ double gamma(int formula_num) {
 double lambda(int formula_num, NODE node) {
 	switch (formula_num) {
 	case(1):
-		return node.x;
+		return node.y;
+		break;
+	case(2):
+		return node.y;
 		break;
 	}
 		
@@ -186,14 +232,18 @@ double lambda(int formula_num, NODE node) {
 double f(int formula_num, NODE node) {
 	switch (formula_num) {
 	case(1):
-		return node.x;
+		return 5*node.x+30*node.y-16;
+		break;
+	case(2):
+		return -6;
+		break;
 	}
 }
 
 double ug(int formula_num, NODE node) {
 	switch (formula_num) {
 	case(1):
-		return node.x;
+		return 6*node.y+2;
 		break;
 	}
 }
@@ -209,7 +259,7 @@ double beta(int formula_num) {
 double ubeta(int formula_num, NODE node) {
 	switch (formula_num) {
 	case(1):
-		return node.x;
+		return 7*node.y+2;
 		break;
 	}
 }
@@ -217,24 +267,19 @@ double ubeta(int formula_num, NODE node) {
 double teta(int formula_num, NODE node) {
 	switch (formula_num) {
 	case(1):
-		return -node.x;
+		return -6*node.y;
 		break;
 	case(2):
-		return node.x;
+		return -node.y;
+		break;
+	case(3):
+		return 6*node.y;
 		break;
 	}
 }
 
-double calc_mes_edge(ELEM& edge) {
-
-	return sqrt(pow(edge.nodes[1].x - edge.nodes[0].x, 2) + pow(edge.nodes[1].y - edge.nodes[0].y, 2));
-
-}
-
 void solve_local(ELEM & elem) {
-	double detD = (elem.nodes[1].x - elem.nodes[0].x) * (elem.nodes[2].y - elem.nodes[0].y) -
-		(elem.nodes[2].x - elem.nodes[0].x) * (elem.nodes[1].y - elem.nodes[0].y);
-
+	double detD = calc_detD(elem);
 	std::vector<std::vector<double>> coefs =
 
 	{ {(elem.nodes[1].x * elem.nodes[2].y - elem.nodes[2].x * elem.nodes[1].y) / detD,
@@ -334,7 +379,9 @@ void first_bound_cond(SLAE& slae, ELEM& edge) {
 		slae.vec[edge.nodes[node].global_num] = ug(edge.formula_num, edge.nodes[node]);
 
 		for (int k = 0; k < slae.mat.ig[edge.nodes[node].global_num + 1] - slae.mat.ig[edge.nodes[node].global_num]; k++) {
-			slae.vec[slae.mat.jg[slae.mat.ig[edge.nodes[node].global_num]+k]] += slae.vec[edge.nodes[node].global_num] * (-slae.mat.ggl[slae.mat.ig[edge.nodes[node].global_num] + k]);
+			slae.vec[slae.mat.jg[slae.mat.ig[edge.nodes[node].global_num]+k]] +=
+				slae.vec[edge.nodes[node].global_num] * (-slae.mat.ggl[slae.mat.ig[edge.nodes[node].global_num] + k]);
+
 			slae.mat.ggl[slae.mat.ig[edge.nodes[node].global_num] + k] = 0;
 		}
 
@@ -656,6 +703,11 @@ int main() {
 	std::cout << std::endl;
 
 	solve_SLAE_CGM(slae, 1000000);
+
+	std::vector<double> mass_center_num_vals(area.grid.size());
+
+	for (int i=0; i<area.grid.size(); i++)
+		mass_center_num_vals[i] = mass_center_num_val(slae.sol, area.grid[i]);
 
 	output(area, slae.sol, "res.txt");
 
