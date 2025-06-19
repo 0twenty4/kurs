@@ -4,12 +4,12 @@
 #include <set>
 #include <iostream>
 #include <algorithm>
+#include <iomanip>
+#include <math.h>
 
 struct NODE {
 	double x, y;
 	int global_num = -1;
-	
-	int formula_num = -1;
 
 	NODE(double x, double y, int global_num) :
 		x(x), y(y), global_num(global_num) {}
@@ -63,10 +63,11 @@ struct SLAE {
 	std::vector<double> sol;
 	double epsilon;
 
-	SLAE(int n, double epsilon) : mat(n), vec(n), sol(n), epsilon(epsilon) {}
+	SLAE(MAT mat, int n, double epsilon) :
+		mat(mat), vec(n), sol(n), epsilon(epsilon) {}
 
-	SLAE(MAT mat,int n) :
-		mat(mat), vec(n), sol(n) {}
+	SLAE(MAT mat, int n) :
+		mat(mat), vec(n), sol(n) {};
 
 	void clear_sol() {
 		for (int i = 0; i < mat.n; i++)
@@ -74,9 +75,9 @@ struct SLAE {
 	}
 };
 
-void input(AREA& area, std::string nodes_file, std::string elems_file,
+void input(AREA& area, double& epsilon, int& max_iter, std::string nodes_file, std::string elems_file,
 	std::string first_bound_cond, std::string second_bound_cond_file,
-	std::string third_bound_cond_file) {
+	std::string third_bound_cond_file, std::string slae_params_file) {
 
 	std::ifstream in(nodes_file);
 
@@ -107,10 +108,10 @@ void input(AREA& area, std::string nodes_file, std::string elems_file,
 
 	in.open(first_bound_cond);
 
-
 	while (in >> node1_global_num >> node2_global_num >> formula_num) {
 
 		ELEM edge({ area.nodes[node1_global_num], area.nodes[node2_global_num] }, formula_num, 0);
+
 		area.first_bound_cond.push_back(edge);
 	}
 
@@ -133,10 +134,15 @@ void input(AREA& area, std::string nodes_file, std::string elems_file,
 	}
 
 	in.close();
+
+	in.open(slae_params_file);
+
+	in >> epsilon >> max_iter;
+	
 }
 
 double u(NODE node) {
-	return node.x + 6 * node.y - 2;
+	return sin(node.x) + cos(node.y);
 }
 
 double calc_detD(ELEM& elem) {
@@ -169,13 +175,28 @@ double mass_center_num_val(std::vector<double>& slae_sol, ELEM& elem) {
 void output(AREA& area, std::vector<double> slae_sol, std::string res_file) {
 	std::ofstream out(res_file);
 
-	for (int i = 0; i < slae_sol.size(); i++)
-		out << slae_sol[i] << " " << u(area.nodes[i]) << std::endl;
+	out << std::scientific << std::setprecision(15);
+
+	double u_analit;
+	double err;
+
+	for (int i = 0; i < slae_sol.size(); i++) {
+		u_analit = u(area.nodes[i]);
+
+		out << i << " " << slae_sol[i] << " " << u_analit << " " << abs(slae_sol[i] - u_analit) << std::endl;
+	}
 
 	out << std::endl;
 
-	for (int i = 0; i < area.grid.size(); i++)
-		out << mass_center_num_val(slae_sol, area.grid[i]) << " " << u(area.grid[i].mass_center) << std::endl;
+	double u_num;
+
+	for (int i = 0; i < area.grid.size(); i++) {
+		u_analit = u(area.grid[i].mass_center);
+
+		u_num = mass_center_num_val(slae_sol, area.grid[i]);
+
+		out << i+1 << " " << u_num << " " << u_analit << " " << abs(u_num - u_analit) << std::endl;
+	}
 }
 
 void portrait(MAT & mat, AREA area) {
@@ -209,10 +230,10 @@ void portrait(MAT & mat, AREA area) {
 double gamma(int formula_num) {
 	switch (formula_num) {
 	case(1):
-		return 5;
+		return 2;
 		break;
 	case(2):
-		return 0;
+		return 1;
 		break;
 	}
 }
@@ -220,7 +241,7 @@ double gamma(int formula_num) {
 double lambda(int formula_num, NODE node) {
 	switch (formula_num) {
 	case(1):
-		return node.y;
+		return node.x;
 		break;
 	case(2):
 		return node.y;
@@ -232,10 +253,10 @@ double lambda(int formula_num, NODE node) {
 double f(int formula_num, NODE node) {
 	switch (formula_num) {
 	case(1):
-		return 5*node.x+30*node.y-16;
+		return -cos(node.x) + node.x * sin(node.x) + node.x * cos(node.y) + 2 * sin(node.x) + 2 * cos(node.y);
 		break;
 	case(2):
-		return -6;
+		return node.y * sin(node.x) + sin(node.y) + node.y * cos(node.y) + sin(node.x) + cos(node.y);
 		break;
 	}
 }
@@ -243,7 +264,7 @@ double f(int formula_num, NODE node) {
 double ug(int formula_num, NODE node) {
 	switch (formula_num) {
 	case(1):
-		return 6*node.y+2;
+		return sin(node.x) + 1;
 		break;
 	}
 }
@@ -259,7 +280,7 @@ double beta(int formula_num) {
 double ubeta(int formula_num, NODE node) {
 	switch (formula_num) {
 	case(1):
-		return 7*node.y+2;
+		return sin(node.x) + cos(1) - node.y * sin(node.y);
 		break;
 	}
 }
@@ -267,14 +288,16 @@ double ubeta(int formula_num, NODE node) {
 double teta(int formula_num, NODE node) {
 	switch (formula_num) {
 	case(1):
-		return -6*node.y;
+		return -node.x * cos(node.x);
 		break;
 	case(2):
-		return -node.y;
+		return node.x * cos(node.x);
 		break;
 	case(3):
-		return 6*node.y;
+		return -node.y * cos(node.x);
 		break;
+	case(4):
+		return node.y * cos(node.x);
 	}
 }
 
@@ -356,18 +379,20 @@ int find_ind_dichotomy(std::vector<int>&arr, int start, int end, int goal) {
 }
 
 void add_to_global(SLAE& slae, ELEM & elem) {
-
 	for (int i = 0; i < elem.local_mat.size(); i++) {
 		slae.mat.di[elem.nodes[i].global_num] += elem.local_mat[i][i];
 		slae.vec[elem.nodes[i].global_num] += elem.local_vec[i];
 
+		int found = 0;
 		for (int j = 0; j < i; j++) {
 			int ggl_ij = find_ind_dichotomy(slae.mat.jg,
-				slae.mat.ig[elem.nodes[i].global_num],
+				slae.mat.ig[elem.nodes[i].global_num]+found,
 				slae.mat.ig[elem.nodes[i].global_num + 1]-1,
 				elem.nodes[j].global_num);
 
 				slae.mat.ggl[ggl_ij] += elem.local_mat[i][j];
+
+				found++;
 
 		}
 	}
@@ -385,15 +410,18 @@ void first_bound_cond(SLAE& slae, ELEM& edge) {
 			slae.mat.ggl[slae.mat.ig[edge.nodes[node].global_num] + k] = 0;
 		}
 
+		int found = 0;
 		for (int i = edge.nodes[node].global_num + 1; i < slae.mat.n; i++) {
 			int ggl_inodegm = find_ind_dichotomy(slae.mat.jg,
-				slae.mat.ig[i],
+				slae.mat.ig[i]+found,
 				slae.mat.ig[i + 1] - 1,
 				edge.nodes[node].global_num);
 
 			if (ggl_inodegm != -1) {
 				slae.vec[i] += slae.vec[edge.nodes[node].global_num] * (-slae.mat.ggl[ggl_inodegm]);
 				slae.mat.ggl[ggl_inodegm] = 0;
+
+				found++;
 			}
 		}
 	}
@@ -609,9 +637,7 @@ void solve_SLAE_CGM(SLAE& slae, int max_iter) {
 
 		r_cur_norm = sqrt(scal_mult(r_cur, r_cur));
 
-		std::cout << r_cur_norm / f_norm << std::endl;
-
-		if (r_cur_norm / f_norm < slae.epsilon or iter == max_iter)
+		if (r_cur_norm / f_norm <= slae.epsilon or iter == max_iter)
 			break;
 
 		Mr_cur_slae.vec = r_cur;
@@ -630,16 +656,17 @@ void solve_SLAE_CGM(SLAE& slae, int max_iter) {
 
 int main() {
 	AREA area;
+	double epsilon;
+	int max_iter;
 
-	input(area, "nodes.txt", "elems.txt", "first_bound_cond.txt", "second_bound_cond.txt", "third_bound_cond.txt");
+	input(area, epsilon, max_iter, "nodes.txt", "elems.txt", "first_bound_cond.txt", "second_bound_cond.txt", "third_bound_cond.txt",
+		"slae_params.txt");
 
 	MAT mat(area.nodes.size());
 
 	portrait(mat, area);
 
-	SLAE slae(mat, mat.n);
-
-	slae.epsilon = 1e-12;
+	SLAE slae(mat, mat.n, epsilon);
 
 	for (ELEM& elem : area.grid) {
 		solve_local(elem);
@@ -655,54 +682,7 @@ int main() {
 	for (ELEM& edge : area.first_bound_cond)
 		first_bound_cond(slae, edge);
 
-	for (auto& elem : area.grid) {
-		for (int i = 0; i < 3; i++) {
-			for (int j = 0; j < 3; j++) {
-				std::cout << elem.local_mat[i][j] << " ";
-			}
-			std::cout << std::endl;
-		}
-		std::cout << "\n\n";
-
-	}
-
-	for (auto& elem:area.third_bound_cond) {
-		for (int i = 0; i < 2; i++) {
-			for (int j = 0; j < 2; j++) {
-				std::cout << elem.local_mat[i][j] << " ";
-			}
-			std::cout << std::endl;
-		}
-		std::cout << "\n\n";
-
-	}
-
-	for (auto& di : slae.mat.di)
-		std::cout << di << " ";
-
-	std::cout << std::endl;
-	
-	for (auto& ggl : slae.mat.ggl)
-		std::cout << ggl << " ";
-
-	std::cout << std::endl;
-
-	for (auto& ig : slae.mat.ig)
-		std::cout << ig << " ";
-
-	std::cout << std::endl;
-
-	for (auto& jg : slae.mat.jg)
-		std::cout << jg << " ";
-
-	std::cout << std::endl;
-
-	for (auto& vec : slae.vec)
-		std::cout << vec << " ";
-
-	std::cout << std::endl;
-
-	solve_SLAE_CGM(slae, 1000000);
+	solve_SLAE_CGM(slae, max_iter);
 
 	std::vector<double> mass_center_num_vals(area.grid.size());
 
